@@ -1,0 +1,43 @@
+#### Stručně ale věcně odpovězte na následující otázky: ######
+
+1. Jaká byla dosažena výkonnost v Intel Advisoru pro implementace ref, line a batch
+(v GFLOPS)? (0.5b)
+==============================================================================
+ref - 2.99 GFLOPS
+line - 14.65 GFLOPS
+batch verze bez přehození smyček - 14.81 GFLOPS
+batch verze s přehozením smyček - 7.05 GFLOPS
+
+
+2. Porovnejte implementaci referenčního rešení oproti "Line" a "Batch" implementaci. 
+Jakým způsobem jsou načítána data, proč, a jaký to má vliv na výkon. (1b)
+==============================================================================
+U referenčního řešení nedochází k vektorizaci žádné smyčky, funkce pro výpočet každého bodu se spouští v cyklu. U ostatních řešení byly dle logu compileru smyčky vždy vektorizovány, navíc zarovnána data a vektorizovány i inicializační smyčky pro nahrání výchozích hodnot (výstupní data, pomocné struktury).
+V implementaci Batch s přehozením smyček je korektně využitá vektorizace na vnitřní smyčce, navíc s využitím redukce aby nedocházelo k opakování výpočtů. Načítá bloky zarovnané na velikost cache a na nich paralelně provádí výpočet hodnoty bodu v cyklech za sebou. Implementací cache blockingu by se tato verze měla zrychlit.
+V implementaci Line a Batch bez přehození smyček dochází k paralelnímu zpracování řádku vektorizací smyčky; implementace nemá přehozené smyčky, vektorizovaný for cyklus není na nejnižší úrovni ale na druhé nejnižší, obsahuje ale o jeden cyklus méně a také výpočet hodnoty bodu je jednodušší, žádné podmínky navíc kvůli vektorizaci vnitřní smyčky a načítání z pomocných proměnných. Verze Batch bez přehození řádků funguje podobně, jen řádek načtený z paměti před zpracováním rozdělí na bloky a ty zpracovává odděleně. Vliv na výkon: běží velmi rychle, přestože přístup do paměti není optimální (poor spatial locality).
+
+
+3. Porovnejte Roofline všech modelů. Jsou implementace memory 
+bound? Jaká je vaše aritmetická intenzita? Dokázali byste ji přibližně spočítat 
+i ručně a jak? (1b)
+==============================================================================
+Aritmetická intenzita se dá vypočítat jako počet floating point operací / 1B. Jde spočítat ručně jako podíl časové složitosti programu / jeho prostorová složitost, tj: 
+(počet FLOPS)/(pohyb k přistoupeným B v paměti)
+
+Ref - aritmetická intenzita: 13.8. Pod hranicí propustnosti DRAM, je CPU i memory bound. Vzhledem k ostatním modelům je o dost níž pod DRAM.
+Batch (verze přehozené smyčky) - hlavní smyčka s výpočtem se nachází v memory bound, nad úrovní DRAM, aritmetická intenzita: 0.479. Analýza v Advisoru ukazuje neefektivní přístup do paměti, lze provést memory pattern analýzu v Advisoru a optimalizovat zavedením cache blocking.
+Batch (verze nepřehozené smyčky) - CPU bound, není memory bound, aritmetická intenzita: 5.383. Tato verze je lehce rychlejší než Line, nicméně vektorizovaná smyčka má nižší intenzitu 8.2.
+Line - CPU bound, není memory bound, intenzita: 7.12. Ze všech variant nejvýše v CPU bound, vektorizovaná smyčka má aritm. intenzitu 15.7 (nejvyšší ze všech).
+
+
+4. Komentujte vliv velikosti cache na výkonnost a chování na větších 
+velikostech domény. (1b)
+==============================================================================
+Pokud bude implementován cache blocking u Batch varianty tak ano, větší cache potom sníží počet nutných přístupů do paměti, zlepší se časová i prostorová lokalita a tím se o něco sníží čas potřebný ke zpracování většího datasetu. Otázkou je nakolik je to významné za předpokladu, že zpracování po zarovnaných blocích probíhá vektorizací omezeného počtu hodnot, který zůstane stejný i když se velikost cache zvýší.
+
+
+5. Jaký vliv na výkonnost má symetrie? Lze tento rozdíl pozorovat v Intel Advisor? 
+(nápověda: instrukce) (0.5b)
+============================================================================== 
+
+Symetrie dat umožnuje vynechat celou jednu polovinu výpočtu, tj počet iterací cyklů nutných k dokončení úlohy bude poloviční + instrukce které jsou potřeba k duplikaci horní poloviny dat do spodní. Rozdíl bude vidět např. v sekci Assembly v Advisoru.
