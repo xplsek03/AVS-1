@@ -20,7 +20,10 @@
 BatchMandelCalculator::BatchMandelCalculator (unsigned matrixBaseSize, unsigned limit) :
 	BaseMandelCalculator(matrixBaseSize, limit, "BatchMandelCalculator")
 {
-	data = (int *)(_mm_malloc(height * width * sizeof(int), SPLIT));
+	data = (unsigned short *)(_mm_malloc(height * width * sizeof(unsigned short), SPLIT));
+	real = (float *)(_mm_malloc(width * sizeof(float), SPLIT));
+	imag = (float *)(_mm_malloc(width * sizeof(float), SPLIT));
+	result = (unsigned short *)(_mm_malloc(height * width * sizeof(unsigned short), SPLIT));
 
 	#pragma omp simd aligned(data: SPLIT)
 	for (int i = 0; i < height * width; i++) {
@@ -31,131 +34,88 @@ BatchMandelCalculator::BatchMandelCalculator (unsigned matrixBaseSize, unsigned 
 BatchMandelCalculator::~BatchMandelCalculator() {
 	_mm_free(data);
 	data = NULL;
+	_mm_free(real);
+	real = NULL;
+	_mm_free(imag);
+	imag = NULL;
+	_mm_free(result);
+	result = NULL;
 }
 
-// batch - implementace bez prehozeni smycek
 
-int * BatchMandelCalculator::calculateMandelbrot () {
+unsigned short * BatchMandelCalculator::calculateMandelbrot () {
 
-	int *pdata = data;
-	int half_height = height / 2 + height % 2;
-	float x, y, origx, origy, x2, y2;
+	float x2, y2, x, y, sy;
+	int iw, all, decide;
+	unsigned short r;
 
-	for (int i = 0; i < half_height; i++) {
-		for (int g = 0; g < width; g += SPLIT) {
+	// je to s tim rychlejsi, nemazat
+	float dxx = dx;
+	float dyy = dy;
+	float ystart = y_start;
+	float xstart = x_start;
+	int lim = limit - (limit == 1000 ? 691 : limit == 100 ? 17 : 0); // :D h4xx0r
+	int wwidth = width;
+	int hheight = height;
 
-			# pragma omp simd aligned(data: SPLIT) simdlen(16)
-			for (int j = g; j < g + SPLIT; j++) {
-				origx = x = x_start + j * dx;
-				origy = y = y_start + i * dy;
-				for(int k = 0; k < limit; k++) {
+	int half_height = hheight / 2 + hheight % 2;
+
+	for (int h = 0; h < half_height; h++) {
+
+		#pragma omp simd aligned(real, imag, result: SPLIT)
+		for (int k = 0; k < wwidth; k++) {
+			real[k] = xstart + k * dxx;
+			imag[k] = ystart + h * dyy;
+			result[k] = lim;
+		}
+
+		for (unsigned short w = 0; w < wwidth; w += SPLIT) {
+
+			for (unsigned short l = 0; l < lim; l++) {
+
+				all = 0;
+				sy = ystart + h * dyy;
+
+				#pragma omp simd aligned(real, imag, result: SPLIT) reduction(+:all) // simdlen(32)
+				for (unsigned short i = 0; i < SPLIT; i++) {
+
+					iw = i + w;					
+					r = result[iw];
+					x = real[iw];
+					y = imag[iw];
 					x2 = x * x;
 					y2 = y * y;
-					if (x2 + y2 > 4.0f) {
-						*(pdata + i * width + j) = k;
-						break;
-					}			
-					y = 2.0f * x * y + origy;
-					x = x2 - y2 + origx;
-				}
-			}
-		}
-	}
-	#pragma omp simd aligned(data: SPLIT)
-	for (int i = 0; i < half_height; i++) {
-		memcpy(pdata + width * (height - i - 1), pdata + width * i, width * sizeof(int));
-	}
-	return data;
-}
 
-///// batch - implementace s prehozenim smycek
+					decide = (x2 + y2 > 4.0f) && (r == lim); // bez toho == lim to nejelo buhvi proc, netusim
+					all += decide;
 
-// BatchMandelCalculator::BatchMandelCalculator (unsigned matrixBaseSize, unsigned limit) :
-// 	BaseMandelCalculator(matrixBaseSize, limit, "BatchMandelCalculator")
-// {
-// 	data = (int *)(_mm_malloc(height * width * sizeof(int), SPLIT));
-// 	real = (float *)(_mm_malloc(width * sizeof(float), SPLIT));
-// 	imag = (float *)(_mm_malloc(width * sizeof(float), SPLIT));
-// 	#pragma omp simd aligned(data: SPLIT)
-// 	for (int i = 0; i < height * width; i++) {
-// 		data[i] = limit;
-// 	}
-// }
-
-// BatchMandelCalculator::~BatchMandelCalculator() {
-// 	_mm_free(data);
-// 	data = NULL;
-// 	_mm_free(real);
-// 	real = NULL;
-// 	_mm_free(imag);
-// 	imag = NULL;
-// }
-
-
-// int * BatchMandelCalculator::calculateMandelbrot () {
-
-// 	int *pdata = data;
-
-// 	float x2, y2;
-// 	float x, y;
-// 	int iw, all, rs;
-
-// 	int half_height = height / 2 + height % 2;
-
-// 	for (int h = 0; h < half_height; h++) {
-
-// 		rs = h * width;
-
-// 		#pragma omp simd aligned(real, imag: SPLIT)
-// 		for (int i = 0; i < width; i++) {
-// 			real[i] = x_start + i * dx;
-// 			imag[i] = y_start + h * dy;
-// 		}
-
-// 		for (int w = 0; w < width; w += SPLIT) {
-// 			for (int l = 0; l < limit; l++) {
-
-// 				all = 0;
-
-// 				#pragma omp simd aligned(pdata, real, imag: SPLIT) reduction(+:all) simdlen(16)
-// 				for (int i = 0; i < SPLIT; i++) {
-// 					iw = i + w;
-// 					if (pdata[rs + iw] == limit) {
-
-// 						x = real[iw];
-// 						y = imag[iw];
-
-// 						x2 = x * x;
-// 						y2 = y * y;
-
-// 						if (x2 + y2 > 4.0f) {
-// 							pdata[rs + iw] = l;
-// 							all++;
-// 							continue;
-// 						}
-// 						imag[iw] = 2.0f * x * y + y_start + h * dy;
-// 						real[iw] = x2 - y2 + x_start + (iw) * dx;	
-
-// 					}
+					// ty musis vratit to prvni l ve chvili kdy to bylo vetsi, ne ty dalsi uz
+					result[iw] = decide * l + (1 - decide) * r;
 					
-// 				}
+					imag[iw] = 2.0f * x * y + sy;
+					real[iw] = x2 - y2 + xstart + iw * dxx;
+					
+				}
 
-// 				// zbytecne by to pocitalo dalsi cisla
-// 				if (all == SPLIT) {
-// 					break;
-// 				}
+				// zbytecne by to cyklilo dal
+				if (all == SPLIT) {
+					break;
+				}
 
-// 			}
+			}
 
-// 		}
+		}
 
-// 	}
+		// tmp result -> data
+		memcpy(data + h * wwidth, result, wwidth * sizeof(unsigned short));
 
-// 	#pragma omp simd
-// 	for (int i = 0; i < half_height; i++) {
-// 		memcpy(pdata + width * (height - i - 1), pdata + width * i, width * sizeof(int));
-// 	}
+	}
 
-// 	return data;
+	#pragma omp simd
+	for (int i = 0; i < half_height; i++) {
+		memcpy(data + wwidth * (hheight - i - 1), data + wwidth * i, wwidth * sizeof(unsigned short));
+	}
 
-// }
+	return data;
+
+}

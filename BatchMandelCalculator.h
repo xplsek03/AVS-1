@@ -11,10 +11,11 @@ class BatchMandelCalculator : public BaseMandelCalculator
 public:
     BatchMandelCalculator(unsigned matrixBaseSize, unsigned limit);
     ~BatchMandelCalculator();
-    int *calculateMandelbrot();
+    unsigned short *calculateMandelbrot();
 
 private:
-	int *data;
-	//float *real;
-	//float *imag;
+	unsigned short *data;
+    unsigned short *result;
+	float *real;
+	float *imag;
 };
